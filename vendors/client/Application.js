@@ -1,0 +1,173 @@
+import React, { PureComponent as Component } from 'react';
+import ReactDOM from 'react-dom';
+import { connect } from 'react-redux';
+import PropTypes from 'prop-types';
+import { Route, BrowserRouter as Router } from 'react-router-dom';
+import { Home, Group, Project, Follows, AddProject, Login } from './containers/index';
+import { Alert } from 'antd';
+import User from './containers/User/User.js';
+import Header from './components/Header/Header';
+import Footer from './components/Footer/Footer';
+import Loading from './components/Loading/Loading';
+import MyPopConfirm from './components/MyPopConfirm/MyPopConfirm';
+// import statisticsPage from '../exts/yapi-plugin-statistics/statisticsClientPage/index';
+import { checkLoginState, ssoLoginState } from './reducer/modules/user';
+import { requireAuthentication } from './components/AuthenticatedComponent';
+import fetchJsonp from 'fetch-jsonp';
+import {ticketUrl,loginUrl, getUrlPath} from './config/yysso';
+// import { setTimeout } from 'timers';
+const plugin = require('client/plugin.js');
+
+const LOADING_STATUS = 0;
+
+const alertContent = () => {
+  const ua = window.navigator.userAgent,
+    isChrome = ua.indexOf("Chrome") && window.chrome;
+  if (!isChrome) {
+    return <Alert style={{ zIndex: 99 }} message={'Mock 的接口测试等功能仅支持 Chrome 浏览器，请使用 Chrome 浏览器获得完整功能。'} banner closable />
+  }
+}
+
+let AppRoute = {
+  home: {
+    path: '/',
+    component: Home
+  },
+  group: {
+    path: '/group',
+    component: Group
+  },
+  project: {
+    path: '/project/:id',
+    component: Project
+  },
+  user: {
+    path: '/user',
+    component: User
+  },
+  follow: {
+    path: '/follow',
+    component: Follows
+  },
+  addProject: {
+    path: '/add-project',
+    component: AddProject
+  },
+  login: {
+    path: '/login',
+    component: Login
+  }
+};
+// 增加路由钩子
+plugin.emitHook('app_route', AppRoute);
+
+@connect(
+  state => {
+    return {
+      loginState: state.user.loginState,
+      yyState: state.user.yonSSO
+    };
+  },
+  {
+    checkLoginState,
+    ssoLoginState
+  }
+)
+export default class App extends Component {
+  constructor(props) {
+    super(props);
+    this.state = {
+      login: LOADING_STATUS
+    };
+  }
+
+  static propTypes = {
+    checkLoginState: PropTypes.func,
+    loginState: PropTypes.number,
+    ssoLoginState: PropTypes.func,
+    yyState: PropTypes.number
+  };
+
+
+  componentDidMount() {
+
+    var that = this;
+    console.log("href:", window.location.href);
+    if(this.props.yyState == 0 && window.location.pathname == '/') {
+      fetchJsonp(ticketUrl,
+        {
+          jsonpCallbackFunction: 'yhtjsonpcallback'
+        })
+        .then(function(response) {
+          return response.json()
+        }).then(function(json) {
+          console.dir(json.msg);
+          that.props.ssoLoginState();
+          if(json.needrelogin){
+            return that.props.checkLoginState();
+          } else {
+            window.location.href = loginUrl + "?service=" + getUrlPath() + "/api/user/login_by_token";
+          }
+        }).catch(function(ex) {
+          console.log('parsing failed', ex)
+        })
+    } else {
+      return that.props.checkLoginState();
+    }
+  }
+
+  route = (status) => {
+    let r;
+    if (status === LOADING_STATUS) {
+      return <Loading visible />;
+    } else {
+      r = (
+        <Router getUserConfirmation={(msg, callback) => {
+          // 自定义 window.confirm
+          // http://reacttraining.cn/web/api/BrowserRouter/getUserConfirmation-func
+          let container = document.createElement('div');
+          document.body.appendChild(container);
+          ReactDOM.render((
+            <MyPopConfirm msg={msg} callback={callback} />
+          ), container);
+        }}>
+          <div className="g-main">
+            <div className="router-main">
+              {alertContent()}
+              {this.props.loginState !== 1 ? <Header /> : null}
+              <div className="router-container">
+                {Object.keys(AppRoute).map(key => {
+                  let item = AppRoute[key];
+                  return (
+                    key === 'login' ?
+                      <Route key={key} path={item.path} component={item.component} />
+                      : key === 'home' ? <Route key={key} exact path={item.path} component={item.component} />
+                        : <Route key={key} path={item.path} component={requireAuthentication(item.component)} />
+                  )
+                })
+                }
+              </div>
+              {/* <div className="router-container">
+                <Route exact path="/" component={Home} />
+                <Route path="/group" component={requireAuthentication(Group)} />
+                <Route path="/project/:id" component={requireAuthentication(Project)} />
+                <Route path="/user" component={requireAuthentication(User)} />
+                <Route path="/follow" component={requireAuthentication(Follows)} />
+                <Route path="/add-project" component={requireAuthentication(AddProject)} />
+                <Route path="/login" component={Login} />
+                {/* <Route path="/statistic" component={statisticsPage} /> */}
+              {/* </div> */}
+            </div>
+            <Footer />
+          </div>
+        </Router >
+
+      )
+    }
+    return r;
+  }
+
+  render() {
+    return this.route(this.props.loginState);
+  }
+}
